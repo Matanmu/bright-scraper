@@ -80,7 +80,6 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
     return res.status(400).json({ error: 'No URL found in prompt. Please include a full URL (e.g. https://amazon.com)' });
   }
 
-  // Validate chatId format if provided
   if (chatId && !/^[0-9a-f-]{36}$/i.test(chatId)) {
     return res.status(400).json({ error: 'Invalid chat ID.' });
   }
@@ -110,8 +109,7 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
     logger.info('[scrape] saving to database...');
 
     if (chatId) {
-      // Append to existing chat
-      const { data: updated, error: appendError } = appendMessage(chatId, message, userId);
+      const { data: updated, error: appendError } = await appendMessage(chatId, message, userId);
       if (appendError) {
         logger.error(`[scrape] db append error: ${appendError}`);
       } else {
@@ -119,8 +117,7 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
         logger.info(`[scrape] appended message to chat ${savedChatId}`);
       }
     } else {
-      // Create new chat
-      const { data: created, error: createError } = createChat(message, userId);
+      const { data: created, error: createError } = await createChat(message, userId);
       if (createError) {
         logger.error(`[scrape] db create error: ${createError}`);
       } else {
@@ -136,7 +133,7 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
 });
 
 router.get('/history', requireAuth, async (req, res) => {
-  const { data, error } = getHistory(req.user.userId);
+  const { data, error } = await getHistory(req.user.userId);
   if (error) {
     logger.error(`[history] get error: ${error}`);
     return res.status(500).json({ error: 'Failed to load history.' });
@@ -150,7 +147,7 @@ router.delete('/history/:id', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Invalid ID.' });
   }
   logger.info(`[history] delete id: ${id}`);
-  const { success, error } = deleteChat(id, req.user.userId);
+  const { success, error } = await deleteChat(id, req.user.userId);
   if (error) {
     logger.error(`[history] delete error: ${error}`);
     return res.status(500).json({ error: 'Failed to delete history item.' });

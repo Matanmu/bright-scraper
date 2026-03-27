@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const logger = require('./logger');
+const { connectDB } = require('./db');
 const { authMiddleware } = require('./middleware/auth');
 const scrapeRouter = require('./routes/scrape');
 const authRouter = require('./routes/auth');
@@ -22,6 +23,13 @@ app.use(authMiddleware);
 app.use('/api/auth', authRouter);
 app.use('/api', scrapeRouter);
 
-app.listen(PORT, () => {
-  logger.info(`Server running on http://localhost:${PORT}`);
-});
+connectDB()
+  .then(() => {
+    app.listen(PORT, () => {
+      logger.info(`Server running on http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    logger.error(`Failed to connect to MongoDB: ${err.message}`);
+    process.exit(1);
+  });

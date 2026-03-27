@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db = require('../db');
+const { User } = require('../db');
 const logger = require('../logger');
 
 const router = express.Router();
@@ -21,7 +21,7 @@ router.post('/register', async (req, res) => {
   }
 
   try {
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
+    const existing = await User.findOne({ email: email.toLowerCase().trim() });
     if (existing) {
       return res.status(409).json({ error: 'Email already registered' });
     }
@@ -30,9 +30,7 @@ router.post('/register', async (req, res) => {
     const now = new Date().toISOString();
     const password_hash = await bcrypt.hash(password, 10);
 
-    db.prepare(
-      'INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)'
-    ).run(id, email.toLowerCase().trim(), password_hash, now);
+    await new User({ _id: id, email: email.toLowerCase().trim(), password_hash, created_at: now }).save();
 
     const token = generateToken(id, email.toLowerCase().trim());
     logger.info(`[auth] registered new user: ${email}`);
@@ -51,7 +49,7 @@ router.post('/login', async (req, res) => {
   }
 
   try {
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim());
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -61,9 +59,9 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const token = generateToken(user.id, user.email);
+    const token = generateToken(user._id, user.email);
     logger.info(`[auth] login: ${user.email}`);
-    return res.json({ token, user: { id: user.id, email: user.email } });
+    return res.json({ token, user: { id: user._id, email: user.email } });
   } catch (err) {
     logger.error(`[auth] login error: ${err.message}`);
     return res.status(500).json({ error: 'Login failed. Please try again.' });

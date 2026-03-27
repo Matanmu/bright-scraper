@@ -1,30 +1,26 @@
-const Database = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs');
+const mongoose = require('mongoose');
 
-const dataDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+const userSchema = new mongoose.Schema({
+  _id: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password_hash: { type: String, required: true },
+  created_at: { type: String, required: true },
+});
+
+const chatSchema = new mongoose.Schema({
+  _id: { type: String, required: true },
+  user_id: { type: String, required: true, index: true },
+  messages: { type: Array, default: [] },
+  created_at: { type: String, required: true },
+  updated_at: { type: String, required: true },
+});
+
+const User = mongoose.models.User || mongoose.model('User', userSchema);
+const Chat = mongoose.models.Chat || mongoose.model('Chat', chatSchema);
+
+async function connectDB() {
+  if (mongoose.connection.readyState >= 1) return;
+  await mongoose.connect(process.env.MONGODB_URI);
 }
 
-const db = new Database(path.join(dataDir, 'database.db'));
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS chats (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    messages TEXT NOT NULL DEFAULT '[]',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-`);
-
-module.exports = db;
+module.exports = { connectDB, User, Chat };

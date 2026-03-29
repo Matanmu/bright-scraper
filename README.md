@@ -6,6 +6,8 @@ Built with **BrightData Scraping Browser** (bypasses bot detection) and **Claude
 
 ![Tech Stack](https://img.shields.io/badge/React-19-blue) ![Node](https://img.shields.io/badge/Node.js-20-green) ![License](https://img.shields.io/badge/license-MIT-blue)
 
+**[Live Demo →](https://frontend-production-0a36.up.railway.app)**
+
 ---
 
 ## How it works
@@ -23,6 +25,7 @@ Built with **BrightData Scraping Browser** (bypasses bot detection) and **Claude
 - Node.js 18+
 - A [BrightData](https://brightdata.com) account with a **Scraping Browser** zone (free trial available)
 - An [Anthropic](https://console.anthropic.com) API key
+- A [MongoDB Atlas](https://mongodb.com/atlas) free cluster (or any MongoDB instance)
 
 ---
 
@@ -48,6 +51,7 @@ Fill in your `.env`:
 ANTHROPIC_API_KEY=sk-ant-...
 BRIGHTDATA_WS_ENDPOINT=wss://brd-customer-...@brd.superproxy.io:9222
 JWT_SECRET=any-random-string
+MONGODB_URI=mongodb+srv://<user>:<password>@cluster.mongodb.net/bright-scraper
 PORT=5001
 CORS_ORIGIN=http://localhost:3000
 ```
@@ -55,6 +59,7 @@ CORS_ORIGIN=http://localhost:3000
 **Where to get the keys:**
 - `ANTHROPIC_API_KEY` → [console.anthropic.com](https://console.anthropic.com) → API Keys
 - `BRIGHTDATA_WS_ENDPOINT` → BrightData dashboard → Scraping Browser zone → Access parameters → WebSocket endpoint
+- `MONGODB_URI` → [MongoDB Atlas](https://mongodb.com/atlas) free tier → Connect → Drivers
 
 ```bash
 npm install
@@ -81,7 +86,7 @@ Open [http://localhost:3000](http://localhost:3000).
 bright-scraper/
 ├── backend/
 │   ├── server.js          # Express entry point
-│   ├── db.js              # SQLite setup
+│   ├── db.js              # MongoDB connection + Mongoose models
 │   ├── middleware/
 │   │   └── auth.js        # JWT auth middleware
 │   ├── routes/
@@ -90,7 +95,7 @@ bright-scraper/
 │   └── services/
 │       ├── brightdata.js  # Playwright + BrightData CDP connection
 │       ├── claude.js      # Anthropic SDK — URL resolution + data extraction
-│       └── database.js    # SQLite chat history
+│       └── database.js    # MongoDB chat history
 └── frontend/
     └── src/
         ├── App.jsx                    # Main app + routing
@@ -112,6 +117,7 @@ bright-scraper/
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `BRIGHTDATA_WS_ENDPOINT` | BrightData Scraping Browser WebSocket URL |
 | `JWT_SECRET` | Secret for signing JWT tokens |
+| `MONGODB_URI` | MongoDB connection string |
 | `PORT` | Port to run the backend on (default: 5001) |
 | `CORS_ORIGIN` | Allowed frontend origin (default: http://localhost:3000) |
 
@@ -120,7 +126,7 @@ bright-scraper/
 | Variable | Description |
 |---|---|
 | `REACT_APP_API_URL` | Backend URL (default: http://localhost:5001) |
-| `REACT_APP_SHOW_OVERVIEW` | Set to `true` to show the Overview page |
+| `REACT_APP_SHOW_OVERVIEW` | Set to `true` to show the About page |
 
 ---
 

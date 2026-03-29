@@ -97,14 +97,21 @@ body {
 }
 
 .nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 13.5px;
-  color: #374151;
-  background: none;
+  background: linear-gradient(135deg, #6c63ff, #a855f7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   border: none;
   cursor: pointer;
   padding: 0;
-  transition: color 0.15s;
-  &:hover { color: #0a0a0a; }
+  text-decoration: none;
+  transition: opacity 0.15s;
+  svg { flex-shrink: 0; color: #6c63ff; -webkit-text-fill-color: initial; }
+  &:hover { opacity: 0.75; }
 }
 
 .header-right {

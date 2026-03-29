@@ -15,7 +15,7 @@ const STACK = [
     items: [
       { name: 'Node.js', desc: 'Runtime' },
       { name: 'Express', desc: 'API server' },
-      { name: 'SQLite', desc: 'Local database — zero setup required' },
+      { name: 'MongoDB', desc: 'Cloud database via MongoDB Atlas' },
       { name: 'JWT', desc: 'Authentication' },
       { name: 'Playwright', desc: 'CDP client for BrightData connection' },
     ],
@@ -43,7 +43,7 @@ const FLOW = [
   { step: '02', title: 'Claude resolves the URL', desc: 'Claude AI figures out the best search/listing page to scrape based on your prompt.' },
   { step: '03', title: 'BrightData fetches the page', desc: 'Playwright connects to BrightData\'s Scraping Browser, which renders the full page and bypasses bot detection.' },
   { step: '04', title: 'Claude extracts the data', desc: 'The rendered HTML is sent to Claude, which extracts exactly what you asked for as structured JSON.' },
-  { step: '05', title: 'Results saved & displayed', desc: 'Data is saved to Supabase for history, and displayed as a table you can export to CSV.' },
+  { step: '05', title: 'Results saved & displayed', desc: 'Data is saved to MongoDB for history, and displayed as a table you can export to CSV.' },
 ];
 
 export default function OverviewPage() {
@@ -52,7 +52,7 @@ export default function OverviewPage() {
       {/* Hero */}
       <section className="ov-hero">
         <div className="ov-hero-badge">Open Source Project</div>
-        <h1 className="ov-hero-title">Bright-Scraper</h1>
+        <h1 className="ov-hero-title">About this project</h1>
         <p className="ov-hero-sub">
           A no-code web scraping tool that lets anyone extract structured data from any website
           using plain English — powered by BrightData's Scraping Browser and Claude AI.

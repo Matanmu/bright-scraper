@@ -66,7 +66,7 @@ router.get('/status', async (req, res) => {
 });
 
 router.post('/scrape', scrapeLimiter, async (req, res) => {
-  const { prompt, chatId } = req.body;
+  const { prompt, chatId, conversationHistory } = req.body;
   logger.info(`[scrape] received prompt (length: ${prompt?.length}), chatId: ${chatId || 'none'}`);
 
   if (!prompt || !prompt.trim()) {
@@ -75,8 +75,12 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
   }
 
   const url = extractURL(prompt);
-  if (!url) {
-    logger.warn('[scrape] no valid URL found in prompt');
+  const history = Array.isArray(conversationHistory) ? conversationHistory.slice(-5) : [];
+  logger.info(`[scrape] url in prompt: ${url || 'none'}, history entries: ${history.length}`);
+
+  // Require a URL unless there's conversation history to infer from
+  if (!url && history.length === 0) {
+    logger.warn('[scrape] no valid URL found in prompt and no history');
     return res.status(400).json({ error: 'No URL found in prompt. Please include a full URL (e.g. https://amazon.com)' });
   }
 
@@ -84,9 +88,14 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Invalid chat ID.' });
   }
 
-  const searchURL = await resolveSearchURL(url, prompt);
+  let searchURL = await resolveSearchURL(url, prompt, history);
   logger.info(`[scrape] fetching URL: ${searchURL}`);
-  const { html, error: fetchError } = await fetchPageHTML(searchURL);
+  let { html, error: fetchError, status } = await fetchPageHTML(searchURL);
+  if (status >= 400 && searchURL !== url) {
+    logger.warn(`[scrape] resolved URL returned ${status}, falling back to base URL: ${url}`);
+    searchURL = url;
+    ({ html, error: fetchError } = await fetchPageHTML(url));
+  }
   if (fetchError) {
     logger.error(`[scrape] brightdata error: ${fetchError}`);
     return res.status(500).json({ error: 'Failed to fetch the page. Please try again.' });
@@ -129,7 +138,7 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
     logger.info('[scrape] guest user — skipping history save');
   }
 
-  return res.json({ data, chatId: savedChatId, saved: !!savedChatId });
+  return res.json({ data, chatId: savedChatId, saved: !!savedChatId, resolvedUrl: searchURL });
 });
 
 router.get('/history', requireAuth, async (req, res) => {

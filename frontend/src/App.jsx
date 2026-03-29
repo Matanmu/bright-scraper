@@ -16,6 +16,15 @@ const PLACEHOLDERS = [
   'go to https://imdb.com and get me top 5 movies with title, year and rating',
 ];
 
+const TEMPLATES = [
+  { label: 'Amazon',   description: 'Top keyboards with price & rating',        prompt: 'go to https://amazon.com and get me 5 Logitech keyboards with title, price and rating' },
+  { label: 'IMDB',     description: 'Top 10 movies with year & rating',          prompt: 'go to https://imdb.com and get me top 10 movies with title, year and rating' },
+  { label: 'Airbnb',   description: 'Paris listings with price & rating',        prompt: 'go to https://airbnb.com and get me 5 listings in Paris with title, price per night and rating' },
+  { label: 'eBay',     description: 'Nike sneakers with price & link',           prompt: 'go to https://ebay.com and get me 5 Nike sneakers with name, price and link' },
+  { label: 'Yelp',     description: 'NYC pizza spots with rating & address',     prompt: 'go to https://yelp.com and get me 5 pizza restaurants in New York with name, rating and address' },
+  { label: 'LinkedIn', description: 'Frontend dev jobs with company & location', prompt: 'go to https://linkedin.com/jobs and get me 5 frontend developer jobs with title, company and location' },
+];
+
 function useAnimatedPlaceholder() {
   const [placeholder, setPlaceholder] = useState('');
   const [index, setIndex] = useState(0);
@@ -134,12 +143,10 @@ function Header({ user, onLoginClick, onLogout }) {
             <LogoIcon />
           </div>
           <span className="header-brand" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>Bright-Scraper</span>
-          {process.env.REACT_APP_SHOW_OVERVIEW === 'true' && (
-            <nav className="header-nav">
-              <button className="nav-link" onClick={() => navigate('/about')}><InfoIcon />About this project</button>
+          <nav className="header-nav">
+            <button className="nav-link" onClick={() => navigate('/about')}><InfoIcon />About this project</button>
             <a className="nav-link" href="https://github.com/Matanmu/bright-scraper" target="_blank" rel="noreferrer"><GitHubIcon />GitHub</a>
-            </nav>
-          )}
+          </nav>
         </div>
         <div className="header-right">
           {user ? (
@@ -168,7 +175,7 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState([]); // each: { prompt, results, url }
   const [chatId, setChatId] = useState(id || null);
   const conversationEndRef = useRef(null);
   const animatedPlaceholder = useAnimatedPlaceholder();
@@ -216,13 +223,17 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
     setPrompt('');
 
     try {
+      const conversationHistory = messages
+        .map((m) => ({ prompt: m.prompt, url: m.url || m.prompt.match(/https?:\/\/[^\s]+/i)?.[0] || '' }))
+        .filter((m) => m.url);
+
       const res = await axios.post(
         `${API_URL}/api/scrape`,
-        { prompt: submittedPrompt, chatId },
+        { prompt: submittedPrompt, chatId, conversationHistory },
         { headers: authHeaders },
       );
 
-      const newMessage = { prompt: submittedPrompt, results: res.data.data };
+      const newMessage = { prompt: submittedPrompt, results: res.data.data, url: res.data.resolvedUrl };
       setMessages((prev) => [...prev, newMessage]);
 
       if (res.data.chatId) {
@@ -267,20 +278,37 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
       {!hasMessages && (
         <div className="app-main-centered">
           {!id && (
-            <div className="hero">
-              <div className="hero-eyebrow">
-                <span className="hero-eyebrow-dot" />
-                Powered by BrightData Scraping Browser API
+            <>
+              <div className="hero">
+                <div className="hero-eyebrow">
+                  <span className="hero-eyebrow-dot" />
+                  Powered by BrightData Scraping Browser API
+                </div>
+                <h1 className="hero-title">
+                  Turn your words into<br />
+                  <span className="hero-title-gradient">web scrapers</span>
+                </h1>
+                <p className="hero-subtitle">
+                  Describe what you need in plain English — Bright-Scraper extracts structured data
+                  from any website in seconds, no code required.
+                </p>
               </div>
-              <h1 className="hero-title">
-                Turn your words into<br />
-                <span className="hero-title-gradient">web scrapers</span>
-              </h1>
-              <p className="hero-subtitle">
-                Describe what you need in plain English — Bright-Scraper extracts structured data
-                from any website in seconds, no code required.
-              </p>
-            </div>
+              <div className="templates">
+                <p className="templates-label">Try an example</p>
+                <div className="templates-grid">
+                  {TEMPLATES.map((t) => (
+                    <button
+                      key={t.label}
+                      className="template-card"
+                      onClick={() => { setPrompt(t.prompt); setError(null); }}
+                    >
+                      <span className="template-card-label">{t.label}</span>
+                      <span className="template-card-desc">{t.description}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -418,9 +446,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<ChatPage onHistoryUpdate={setHistoryItems} token={token} apiStatus={apiStatus} />} />
           <Route path="/chat/:id" element={<ChatPage onHistoryUpdate={setHistoryItems} token={token} apiStatus={apiStatus} />} />
-          {process.env.REACT_APP_SHOW_OVERVIEW === 'true' && (
-            <Route path="/about" element={<div className="app-main"><OverviewPage /></div>} />
-          )}
+          <Route path="/about" element={<div className="app-main"><OverviewPage /></div>} />
         </Routes>
       </div>
       <button className="new-scrape-fab" onClick={handleNewScrape} title="New scrape">

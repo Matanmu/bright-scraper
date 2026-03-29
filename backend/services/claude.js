@@ -80,8 +80,12 @@ ${text}`,
   }
 }
 
-async function resolveSearchURL(baseURL, prompt) {
+async function resolveSearchURL(baseURL, prompt, conversationHistory = []) {
   if (!process.env.ANTHROPIC_API_KEY) return baseURL;
+
+  const historyContext = conversationHistory.length > 0
+    ? `\nConversation history (previous prompts and URLs used):\n${conversationHistory.map((h, i) => `${i + 1}. Prompt: "${h.prompt}" → URL: ${h.url}`).join('\n')}\n`
+    : '';
 
   try {
     const message = await withRetry(() => client.messages.create({
@@ -90,10 +94,10 @@ async function resolveSearchURL(baseURL, prompt) {
       messages: [
         {
           role: 'user',
-          content: `Given this base URL and user prompt, return the best direct search/listing URL to scrape. Return ONLY the URL, nothing else.
-
-Base URL: ${baseURL}
-User prompt: ${prompt}
+          content: `Given a base URL (may be null for follow-up prompts), conversation history, and the current user prompt, return the best direct URL to scrape. Use the conversation history to understand follow-up requests that reference previous searches. Return ONLY the URL, nothing else.
+${historyContext}
+Base URL: ${baseURL || 'none — this is a follow-up, infer from history'}
+Current prompt: ${prompt}
 
 Examples:
 - "go to https://imdb.com and get top 5 movies" → https://www.imdb.com/chart/top/
@@ -101,6 +105,8 @@ Examples:
 - "go to https://airbnb.com and get 5 listings in Paris" → https://www.airbnb.com/s/Paris/homes
 - "go to https://ebay.com and get 5 Rolex watches" → https://www.ebay.com/sch/i.html?_nkw=Rolex+watches
 - "go to https://yelp.com and get 5 pizza restaurants in NYC" → https://www.yelp.com/search?find_desc=pizza&find_loc=New+York+City
+- follow-up "in Israel" after LinkedIn jobs search → https://www.linkedin.com/jobs/search/?keywords=frontend+developer&location=Israel
+- follow-up "now in London" after Airbnb Paris search → https://www.airbnb.com/s/London/homes
 
 Return only the URL:`,
         },
@@ -108,7 +114,6 @@ Return only the URL:`,
     }));
 
     const url = message.content[0].text.trim();
-    // Validate it looks like a URL
     new URL(url);
     logger.info(`[claude] resolved search URL: ${url}`);
     return url;

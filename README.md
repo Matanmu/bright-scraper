@@ -31,6 +31,33 @@ Built with **BrightData Scraping Browser** (bypasses bot detection) and **Claude
 
 ## Setup
 
+### Option A — Docker (recommended)
+
+The easiest way to run everything locally with one command.
+
+**Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+
+```bash
+git clone https://github.com/matanmu/bright-scraper
+cd bright-scraper
+
+# Copy and fill in your secrets
+cp backend/.env.example backend/.env
+# Edit backend/.env with your API keys (MONGODB_URI is set automatically by Docker)
+
+# Build and start all services
+docker compose up --build
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+To stop: `docker compose down`
+To stop and delete all data: `docker compose down -v`
+
+---
+
+### Option B — Manual setup
+
 ### 1. Clone the repo
 
 ```bash

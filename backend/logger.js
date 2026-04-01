@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const logsDir = path.join(__dirname, 'logs');
+if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 
 function getLogFile() {
   const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD

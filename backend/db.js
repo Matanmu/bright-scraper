@@ -5,6 +5,10 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password_hash: { type: String, required: true },
   created_at: { type: String, required: true },
+  email_verified: { type: Boolean, default: false },
+  verification_code: { type: String, default: null },
+  code_expires_at: { type: String, default: null },
+  terms_accepted_at: { type: String, default: null },
 });
 
 const chatSchema = new mongoose.Schema({

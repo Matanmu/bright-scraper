@@ -8,7 +8,10 @@ async function fetchPageHTML(url) {
   try {
     browser = await chromium.connectOverCDP(process.env.BRIGHTDATA_WS_ENDPOINT);
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'load', timeout: 60000 });
+    const response = await page.goto(url, { waitUntil: 'load', timeout: 60000 });
+    if (response && response.status() >= 400) {
+      return { error: `Page returned ${response.status()}`, status: response.status() };
+    }
     await page.waitForTimeout(5000);
     // Retry content grab up to 3 times in case of mid-navigation state
     let html;

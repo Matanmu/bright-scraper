@@ -5,24 +5,31 @@ import History from './components/History';
 import ResultsTable from './components/ResultsTable';
 import OverviewPage from './components/OverviewPage';
 import LoginModal from './components/LoginModal';
+import AdminDashboard from './components/AdminDashboard';
+import TermsPage from './components/TermsPage';
 import './App.scss';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
 
+const ADMIN_EMAILS = (process.env.REACT_APP_ADMIN_EMAILS || '')
+  .split(',')
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
+
 const PLACEHOLDERS = [
-  'go to https://amazon.com and get me 5 Logitech keyboards with title, price and rating',
-  'go to https://ebay.com and get me 5 Rolex watches with name, price and link',
-  'go to https://airbnb.com and get me 5 listings in Paris with title, price and rating',
-  'go to https://imdb.com and get me top 5 movies with title, year and rating',
+  'go to amazon spain and find me nike shoes under 100€ with title, price and link',
+  'find me 5 Rolex watches on ebay uk with name, price and link',
+  'get airbnb listings in Tokyo with title, price per night and rating',
+  'top 10 movies on imdb with title, year and rating',
 ];
 
 const TEMPLATES = [
-  { label: 'Amazon',   description: 'Top keyboards with price & rating',        prompt: 'go to https://amazon.com and get me 5 Logitech keyboards with title, price and rating' },
-  { label: 'IMDB',     description: 'Top 10 movies with year & rating',          prompt: 'go to https://imdb.com and get me top 10 movies with title, year and rating' },
-  { label: 'Airbnb',   description: 'Paris listings with price & rating',        prompt: 'go to https://airbnb.com and get me 5 listings in Paris with title, price per night and rating' },
-  { label: 'eBay',     description: 'Nike sneakers with price & link',           prompt: 'go to https://ebay.com and get me 5 Nike sneakers with name, price and link' },
-  { label: 'Yelp',     description: 'NYC pizza spots with rating & address',     prompt: 'go to https://yelp.com and get me 5 pizza restaurants in New York with name, rating and address' },
-  { label: 'LinkedIn', description: 'Frontend dev jobs with company & location', prompt: 'go to https://linkedin.com/jobs and get me 5 frontend developer jobs with title, company and location' },
+  { label: 'Amazon US',  description: 'Logitech keyboards with price & rating',   prompt: 'go to amazon us and get me 5 Logitech keyboards with title, price and rating' },
+  { label: 'Amazon Spain', description: 'Nike shoes with price & link',           prompt: 'go to amazon spain and find me 5 nike shoes with title, price and link' },
+  { label: 'IMDB',       description: 'Top 10 movies with year & rating',         prompt: 'top 10 movies on imdb with title, year and rating' },
+  { label: 'Airbnb',     description: 'Tokyo listings with price & rating',       prompt: 'get me 5 airbnb listings in Tokyo with title, price per night and rating' },
+  { label: 'eBay UK',    description: 'Rolex watches with price & link',          prompt: 'find me 5 Rolex watches on ebay uk with name, price and link' },
+  { label: 'LinkedIn',   description: 'Frontend dev jobs in Tel Aviv',            prompt: 'find 5 frontend developer jobs on linkedin in Tel Aviv with title, company and location' },
 ];
 
 function useAnimatedPlaceholder() {
@@ -132,7 +139,15 @@ function StatusDot({ status }) {
   return <span className={`status-dot status-dot--${status || 'loading'}`} title={label} />;
 }
 
-function Header({ user, onLoginClick, onLogout }) {
+function ShieldIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>
+  );
+}
+
+function Header({ user, onLoginClick, onRegisterClick, onLogout, isAdmin }) {
   const navigate = useNavigate();
 
   return (
@@ -146,6 +161,9 @@ function Header({ user, onLoginClick, onLogout }) {
           <nav className="header-nav">
             <button className="nav-link" onClick={() => navigate('/about')}><InfoIcon />About this project</button>
             <a className="nav-link" href="https://github.com/Matanmu/bright-scraper" target="_blank" rel="noreferrer"><GitHubIcon />GitHub</a>
+            {isAdmin && (
+              <button className="nav-link nav-link--admin" onClick={() => navigate('/admin')}><ShieldIcon />Admin</button>
+            )}
           </nav>
         </div>
         <div className="header-right">
@@ -160,7 +178,7 @@ function Header({ user, onLoginClick, onLogout }) {
           ) : (
             <>
               <button className="btn-ghost" onClick={onLoginClick}>Log in</button>
-              <button className="btn-gradient" onClick={onLoginClick}>Get Started</button>
+              <button className="btn-gradient" onClick={onRegisterClick}>Get Started</button>
             </>
           )}
         </div>
@@ -175,7 +193,7 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [messages, setMessages] = useState([]); // each: { prompt, results, url }
+  const [messages, setMessages] = useState([]); // each: { prompt, results, url } or { reply }
   const [chatId, setChatId] = useState(id || null);
   const conversationEndRef = useRef(null);
   const animatedPlaceholder = useAnimatedPlaceholder();
@@ -202,30 +220,32 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
     }
     setChatId(id);
     if (!token) return;
+    // Skip fetch if we already have messages loaded for this specific chat
+    if (chatId === id && messages.length > 0) return;
     axios.get(`${API_URL}/api/history`, { headers: authHeaders })
       .then((res) => {
         const item = (res.data.data || []).find((h) => h.id === id);
         if (item && Array.isArray(item.messages)) {
-          setMessages(item.messages.map((m) => ({ prompt: m.prompt, results: m.results })));
+          const mapped = [];
+          item.messages.forEach((m) => {
+            mapped.push({ prompt: m.prompt });
+            if (m.reply) mapped.push({ reply: m.reply });
+            else if (m.results) mapped[mapped.length - 1].results = m.results;
+          });
+          setMessages(mapped);
         }
       })
       .catch(() => {});
   }, [id, token]); // eslint-disable-line
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!prompt.trim()) { setError('Please enter a prompt'); return; }
-
+  const doScrape = async (submittedPrompt) => {
     setLoading(true);
     setError(null);
 
-    const submittedPrompt = prompt;
-    setPrompt('');
-
     try {
       const conversationHistory = messages
-        .map((m) => ({ prompt: m.prompt, url: m.url || m.prompt.match(/https?:\/\/[^\s]+/i)?.[0] || '' }))
-        .filter((m) => m.url);
+        .filter((m) => m.url)
+        .map((m) => ({ prompt: m.prompt, url: m.url }));
 
       const res = await axios.post(
         `${API_URL}/api/scrape`,
@@ -233,19 +253,28 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
         { headers: authHeaders },
       );
 
+      if (res.data.reply) {
+        setMessages((prev) => [...prev, { prompt: submittedPrompt }, { reply: res.data.reply }]);
+        if (res.data.chatId) {
+          const newChatId = res.data.chatId;
+          setChatId(newChatId);
+          if (!id || id !== newChatId) navigate(`/chat/${newChatId}`, { replace: !!id });
+          axios.get(`${API_URL}/api/history`, { headers: authHeaders })
+            .then((histRes) => onHistoryUpdate(histRes.data.data || []))
+            .catch(() => {});
+        }
+        return;
+      }
+
       const newMessage = { prompt: submittedPrompt, results: res.data.data, url: res.data.resolvedUrl };
       setMessages((prev) => [...prev, newMessage]);
 
       if (res.data.chatId) {
         const newChatId = res.data.chatId;
         setChatId(newChatId);
-
-        // Navigate to the chat URL if not already there
         if (!id || id !== newChatId) {
           navigate(`/chat/${newChatId}`, { replace: !!id });
         }
-
-        // Refresh history sidebar
         axios.get(`${API_URL}/api/history`, { headers: authHeaders })
           .then((histRes) => onHistoryUpdate(histRes.data.data || []))
           .catch(() => {});
@@ -257,6 +286,15 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
     }
   };
 
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!prompt.trim()) { setError('Please enter a prompt'); return; }
+    const submittedPrompt = prompt;
+    setPrompt('');
+    await doScrape(submittedPrompt);
+  };
+
+
   const hasMessages = messages.length > 0;
 
   return (
@@ -266,8 +304,14 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
           <div className="conversation">
             {messages.map((msg, i) => (
               <div key={i} className="conversation-message">
-                <p className="conversation-message-prompt">{msg.prompt}</p>
-                <ResultsTable data={msg.results} />
+                {msg.reply ? (
+                  <div className="assistant-reply">{msg.reply}</div>
+                ) : (
+                  <>
+                    <p className="conversation-message-prompt">{msg.prompt}</p>
+                    {msg.results && <ResultsTable data={msg.results} />}
+                  </>
+                )}
               </div>
             ))}
             <div ref={conversationEndRef} />
@@ -382,9 +426,11 @@ export default function App() {
   const [historyItems, setHistoryItems] = useState(null);
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
-  const [showLogin, setShowLogin] = useState(false);
+  const [loginMode, setLoginMode] = useState(null);
   const [apiStatus, setApiStatus] = useState(null);
   const navigate = useNavigate();
+
+  const isAdmin = user ? ADMIN_EMAILS.includes(user.email?.toLowerCase()) : false;
 
   // Restore auth from localStorage on mount
   useEffect(() => {
@@ -418,7 +464,7 @@ export default function App() {
     setToken(newToken);
     setUser(newUser);
     setHistoryItems(null); // reload history
-    setShowLogin(false);
+    setLoginMode(null);
   };
 
   const handleLogout = () => {
@@ -435,25 +481,27 @@ export default function App() {
 
   return (
     <div className="app">
-      <Header user={user} onLoginClick={() => setShowLogin(true)} onLogout={handleLogout} />
+      <Header user={user} onLoginClick={() => setLoginMode('login')} onRegisterClick={() => setLoginMode('register')} onLogout={handleLogout} isAdmin={isAdmin} />
       <div className="app-body">
         <History
           historyItems={historyItems}
           setHistoryItems={setHistoryItems}
           token={token}
-          onLoginClick={() => setShowLogin(true)}
+          onLoginClick={() => setLoginMode('login')}
         />
         <Routes>
           <Route path="/" element={<ChatPage onHistoryUpdate={setHistoryItems} token={token} apiStatus={apiStatus} />} />
           <Route path="/chat/:id" element={<ChatPage onHistoryUpdate={setHistoryItems} token={token} apiStatus={apiStatus} />} />
           <Route path="/about" element={<div className="app-main"><OverviewPage /></div>} />
+          <Route path="/terms" element={<div className="app-main"><TermsPage /></div>} />
+          {isAdmin && <Route path="/admin" element={<AdminDashboard token={token} />} />}
         </Routes>
       </div>
       <button className="new-scrape-fab" onClick={handleNewScrape} title="New scrape">
         <ComposeIcon />
         <span>New scrape</span>
       </button>
-      {showLogin && <LoginModal onClose={() => setShowLogin(false)} onSuccess={handleLoginSuccess} />}
+      {loginMode && <LoginModal initialMode={loginMode} onClose={() => setLoginMode(null)} onSuccess={handleLoginSuccess} />}
     </div>
   );
 }

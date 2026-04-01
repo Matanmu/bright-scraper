@@ -80,6 +80,65 @@ ${text}`,
   }
 }
 
+async function interpretPrompt(prompt, conversationHistory = []) {
+  if (!process.env.ANTHROPIC_API_KEY) return { url: null, reply: null };
+
+  const historyContext = conversationHistory.length > 0
+    ? `\nConversation history:\n${conversationHistory.map((h, i) => `${i + 1}. Prompt: "${h.prompt}" → URL: ${h.url}`).join('\n')}\n`
+    : '';
+
+  try {
+    const message = await withRetry(() => client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 512,
+      messages: [
+        {
+          role: 'user',
+          content: `You are Bright-Scraper, an AI assistant that helps users scrape data from any website using plain English.
+
+The user may write naturally without a URL — resolve the site and region from context:
+- "amazon us" → amazon.com, "amazon spain" → amazon.es, "amazon uk" → amazon.co.uk, "amazon germany" → amazon.de, "amazon france" → amazon.fr, "amazon italy" → amazon.it, "amazon japan" → amazon.co.jp
+- "ebay us" → ebay.com, "ebay uk" → ebay.co.uk, "ebay spain" → ebay.es, "ebay germany" → ebay.de, "ebay france" → ebay.fr, "ebay italy" → ebay.it, "ebay australia" → ebay.com.au
+- "airbnb" → airbnb.com, "booking" → booking.com, "yelp" → yelp.com, "imdb" → imdb.com, "linkedin" → linkedin.com
+- Any other site mentioned by name → infer the correct domain
+
+Construct the best search/listing URL from the user's intent:
+- "go to amazon spain and find nike shoes" → https://www.amazon.es/s?k=nike+shoes
+- "get me 5 Rolex watches on ebay uk" → https://www.ebay.co.uk/sch/i.html?_nkw=Rolex+watches
+- "airbnb listings in Tokyo" → https://www.airbnb.com/s/Tokyo/homes
+- "frontend developer jobs on linkedin in Israel" → https://www.linkedin.com/jobs/search/?keywords=frontend+developer&location=Israel
+- "top movies on imdb" → https://www.imdb.com/chart/top/
+${historyContext}
+Current message: ${prompt}
+
+Rules:
+1. If the message is a scraping request and you can resolve a URL → respond with JSON: {"url": "https://..."}
+2. If the message is a scraping request but you need clarification → respond with JSON: {"url": null, "reply": "your short friendly question"}
+3. If the message is NOT a scraping request (greeting, general question, off-topic) → respond with JSON: {"url": null, "reply": "your helpful conversational answer, ending with a nudge to try a scraping request"}
+4. NEVER return anything other than valid JSON with "url" and "reply" keys.`,
+        },
+      ],
+    }));
+
+    const raw = message.content[0].text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    const parsed = JSON.parse(raw);
+
+    if (parsed.url) {
+      new URL(parsed.url);
+      logger.info(`[claude] interpreted prompt → URL: ${parsed.url}`);
+      return { url: parsed.url, reply: null };
+    }
+    if (parsed.reply) {
+      logger.info(`[claude] conversational reply: ${parsed.reply}`);
+      return { url: null, reply: parsed.reply };
+    }
+    return { url: null, reply: null };
+  } catch (err) {
+    logger.warn(`[claude] interpretPrompt failed: ${err.message}`);
+    return { url: null, reply: null };
+  }
+}
+
 async function resolveSearchURL(baseURL, prompt, conversationHistory = []) {
   if (!process.env.ANTHROPIC_API_KEY) return baseURL;
 
@@ -123,4 +182,4 @@ Return only the URL:`,
   }
 }
 
-module.exports = { extractData, resolveSearchURL };
+module.exports = { extractData, resolveSearchURL, interpretPrompt };

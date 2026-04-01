@@ -5,7 +5,7 @@ const rateLimit = require('express-rate-limit');
 const logger = require('../logger');
 const { requireAuth } = require('../middleware/auth');
 const { fetchPageHTML } = require('../services/brightdata');
-const { extractData, resolveSearchURL } = require('../services/claude');
+const { extractData, resolveSearchURL, interpretPrompt } = require('../services/claude');
 const { createChat, appendMessage, getHistory, deleteChat } = require('../services/database');
 
 const router = express.Router();
@@ -15,6 +15,7 @@ const scrapeLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
   message: { error: 'Too many requests, please try again later.' },
 });
 
@@ -78,23 +79,44 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
   const history = Array.isArray(conversationHistory) ? conversationHistory.slice(-5) : [];
   logger.info(`[scrape] url in prompt: ${url || 'none'}, history entries: ${history.length}`);
 
-  // Require a URL unless there's conversation history to infer from
-  if (!url && history.length === 0) {
-    logger.warn('[scrape] no valid URL found in prompt and no history');
-    return res.status(400).json({ error: 'No URL found in prompt. Please include a full URL (e.g. https://amazon.com)' });
-  }
-
   if (chatId && !/^[0-9a-f-]{36}$/i.test(chatId)) {
     return res.status(400).json({ error: 'Invalid chat ID.' });
   }
 
-  let searchURL = await resolveSearchURL(url, prompt, history);
+  // If no explicit URL, use Claude to interpret the natural language prompt
+  let resolvedStartURL = url;
+  if (!url) {
+    const { url: interpreted, reply } = await interpretPrompt(prompt, history);
+    if (reply) {
+      logger.info(`[scrape] conversational reply`);
+      const userId = req.user?.userId;
+      let savedChatId = chatId || null;
+      if (userId) {
+        const message = { prompt, reply };
+        if (chatId) {
+          const { data: updated } = await appendMessage(chatId, message, userId);
+          if (updated) savedChatId = updated.id;
+        } else {
+          const { data: created } = await createChat(message, userId);
+          if (created) savedChatId = created.id;
+        }
+      }
+      return res.json({ reply, chatId: savedChatId });
+    }
+    if (interpreted) {
+      resolvedStartURL = interpreted;
+    } else if (history.length === 0) {
+      return res.status(400).json({ error: 'Could not determine which website to scrape. Please mention a site name or URL.' });
+    }
+  }
+
+  let searchURL = await resolveSearchURL(resolvedStartURL, prompt, history);
   logger.info(`[scrape] fetching URL: ${searchURL}`);
   let { html, error: fetchError, status } = await fetchPageHTML(searchURL);
-  if (status >= 400 && searchURL !== url) {
-    logger.warn(`[scrape] resolved URL returned ${status}, falling back to base URL: ${url}`);
-    searchURL = url;
-    ({ html, error: fetchError } = await fetchPageHTML(url));
+  if (status >= 400 && searchURL !== resolvedStartURL && resolvedStartURL) {
+    logger.warn(`[scrape] resolved URL returned ${status}, falling back to: ${resolvedStartURL}`);
+    searchURL = resolvedStartURL;
+    ({ html, error: fetchError } = await fetchPageHTML(resolvedStartURL));
   }
   if (fetchError) {
     logger.error(`[scrape] brightdata error: ${fetchError}`);

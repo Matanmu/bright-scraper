@@ -1,6 +1,24 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
+
+function ToggleOffIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M8.3 16H10.7C12.7 16 13.5 15.2 13.5 13.2V10.8C13.5 8.8 12.7 8 10.7 8H8.3C6.3 8 5.5 8.8 5.5 10.8V13.2C5.5 15.2 6.3 16 8.3 16Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M17 20H7C3 20 2 19 2 15V9C2 5 3 4 7 4H17C21 4 22 5 22 9V15C22 19 21 20 17 20Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+function ToggleOnIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M13.3 16H15.7C17.7 16 18.5 15.2 18.5 13.2V10.8C18.5 8.8 17.7 8 15.7 8H13.3C11.3 8 10.5 8.8 10.5 10.8V13.2C10.5 15.2 11.3 16 13.3 16Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M17 20H7C3 20 2 19 2 15V9C2 5 3 4 7 4H17C21 4 22 5 22 9V15C22 19 21 20 17 20Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
 
@@ -20,6 +38,7 @@ function extractDomain(prompt) {
 export default function History({ historyItems, setHistoryItems, token, onLoginClick }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [collapsed, setCollapsed] = useState(false);
   const activeId = location.pathname.startsWith('/chat/') ? location.pathname.split('/chat/')[1] : null;
 
   const authHeaders = token
@@ -43,15 +62,20 @@ export default function History({ historyItems, setHistoryItems, token, onLoginC
   const items = historyItems || [];
 
   return (
-    <aside className="history">
-      <h2 className="history-title">History</h2>
+    <aside className={`history${collapsed ? ' history--collapsed' : ''}`}>
+      <div className="history-header">
+        {!collapsed && <h2 className="history-title">History</h2>}
+        <button className="history-toggle" onClick={() => setCollapsed((v) => !v)} title={collapsed ? 'Expand' : 'Collapse'}>
+          {collapsed ? <ToggleOffIcon /> : <ToggleOnIcon />}
+        </button>
+      </div>
 
-      {!token ? (
+      {!collapsed && !token ? (
         <div className="history-auth-prompt">
           <p>Sign in to save and view your scraping history.</p>
           <button className="history-login-btn" onClick={onLoginClick}>Log in</button>
         </div>
-      ) : (
+      ) : !collapsed && (
         <ul className="history-list">
           {items.length === 0 && (
             <p className="history-empty">No history yet</p>

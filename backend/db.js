@@ -13,7 +13,8 @@ const userSchema = new mongoose.Schema({
 
 const chatSchema = new mongoose.Schema({
   _id: { type: String, required: true },
-  user_id: { type: String, required: true, index: true },
+  user_id: { type: String, default: null, index: true },
+  guest_id: { type: String, default: null, index: true },
   messages: { type: Array, default: [] },
   created_at: { type: String, required: true },
   updated_at: { type: String, required: true },

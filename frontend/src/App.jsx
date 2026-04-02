@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useParams, Routes, Route } from 'react-router-dom';
 import axios from 'axios';
 import History from './components/History';
@@ -7,6 +7,7 @@ import OverviewPage from './components/OverviewPage';
 import LoginModal from './components/LoginModal';
 import AdminDashboard from './components/AdminDashboard';
 import TermsPage from './components/TermsPage';
+import { saveGuestChat, loadGuestHistory, deleteGuestChat } from './hooks/useGuestHistory';
 import './App.scss';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
@@ -147,6 +148,46 @@ function ShieldIcon() {
   );
 }
 
+function ArrowUpIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <rect x="4" y="4" width="16" height="16" rx="2"/>
+    </svg>
+  );
+}
+
+function CopyIcon({ copied }) {
+  return copied ? (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>
+  ) : (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+    </svg>
+  );
+}
+
+function useCopy() {
+  const [copied, setCopied] = useState(false);
+  const copy = useCallback((text) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, []);
+  return { copied, copy };
+}
+
 function Header({ user, onLoginClick, onRegisterClick, onLogout, isAdmin }) {
   const navigate = useNavigate();
 
@@ -187,7 +228,59 @@ function Header({ user, onLoginClick, onRegisterClick, onLogout, isAdmin }) {
   );
 }
 
-function ChatPage({ onHistoryUpdate, token, apiStatus }) {
+function PendingMessage() {
+  return (
+    <div className="conversation-message conversation-message--pending">
+      <div className="pending-bubble">
+        <span className="pending-logo"><LogoIcon /></span>
+        <span className="pending-dots">
+          <span /><span /><span />
+        </span>
+        <span className="pending-label">Scraping</span>
+      </div>
+    </div>
+  );
+}
+
+function ConversationMessage({ msg }) {
+  const { copied: copiedPrompt, copy: copyPrompt } = useCopy();
+  const { copied: copiedReply, copy: copyReply } = useCopy();
+
+  if (msg.pending) return <PendingMessage />;
+
+  if (msg.reply) {
+    return (
+      <div className="conversation-message">
+        <div className="assistant-reply-wrapper">
+          <div className="assistant-reply">{msg.reply}</div>
+          <button className="copy-btn copy-btn--always" onClick={() => copyReply(msg.reply)} title="Copy">
+            <CopyIcon copied={copiedReply} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="conversation-message">
+      <div className="conversation-message-prompt-wrapper">
+        <p className="conversation-message-prompt">{msg.prompt}</p>
+        <button className="copy-btn copy-btn--hover" onClick={() => copyPrompt(msg.prompt)} title="Copy">
+          <CopyIcon copied={copiedPrompt} />
+        </button>
+      </div>
+      {msg.results && <ResultsTable data={msg.results} />}
+    </div>
+  );
+}
+
+function getGuestId() {
+  let id = localStorage.getItem('scraperGuestId');
+  if (!id) { id = crypto.randomUUID(); localStorage.setItem('scraperGuestId', id); }
+  return id;
+}
+
+function ChatPage({ onHistoryUpdate, onGuestHistoryUpdate, token, apiStatus }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const [prompt, setPrompt] = useState('');
@@ -196,7 +289,17 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
   const [messages, setMessages] = useState([]); // each: { prompt, results, url } or { reply }
   const [chatId, setChatId] = useState(id || null);
   const conversationEndRef = useRef(null);
+  const textareaRef = useRef(null);
+  const abortControllerRef = useRef(null);
   const animatedPlaceholder = useAnimatedPlaceholder();
+
+  const autoResize = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 300) + 'px';
+    el.style.overflowY = el.scrollHeight > 300 ? 'auto' : 'hidden';
+  }, []);
 
   const authHeaders = token
     ? { Authorization: `Bearer ${token}` }
@@ -219,9 +322,24 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
       return;
     }
     setChatId(id);
-    if (!token) return;
     // Skip fetch if we already have messages loaded for this specific chat
     if (chatId === id && messages.length > 0) return;
+
+    if (!token) {
+      // Load from guest localStorage
+      const guestChats = loadGuestHistory();
+      const item = guestChats.find((c) => c.id === id);
+      if (item && Array.isArray(item.messages)) {
+        const mapped = [];
+        item.messages.forEach((m) => {
+          if (m.prompt) mapped.push({ prompt: m.prompt, results: m.results, url: m.url });
+          if (m.reply) mapped.push({ reply: m.reply });
+        });
+        setMessages(mapped);
+      }
+      return;
+    }
+
     axios.get(`${API_URL}/api/history`, { headers: authHeaders })
       .then((res) => {
         const item = (res.data.data || []).find((h) => h.id === id);
@@ -238,27 +356,53 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
       .catch(() => {});
   }, [id, token]); // eslint-disable-line
 
-  const doScrape = async (submittedPrompt) => {
+  const handleStop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    abortControllerRef.current?.abort();
+    // loading will be cleared in doScrape's finally block
+  }, []);
+
+  const doScrape = async (submittedPrompt, activeChatId) => {
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     setLoading(true);
     setError(null);
 
-    try {
-      const conversationHistory = messages
-        .filter((m) => m.url)
-        .map((m) => ({ prompt: m.prompt, url: m.url }));
+    // Capture conversation history BEFORE optimistic update
+    const conversationHistory = messages
+      .filter((m) => m.prompt || m.reply)
+      .map((m) => ({ prompt: m.prompt, reply: m.reply, url: m.url }));
 
+    // Immediately show user bubble + pending loader in the chat (optimistic)
+    setMessages((prev) => [...prev, { prompt: submittedPrompt }, { pending: true }]);
+
+    try {
       const res = await axios.post(
         `${API_URL}/api/scrape`,
-        { prompt: submittedPrompt, chatId, conversationHistory },
-        { headers: authHeaders },
+        { prompt: submittedPrompt, chatId: activeChatId, conversationHistory, guestId: token ? undefined : getGuestId() },
+        { headers: authHeaders, signal: controller.signal },
       );
 
+      if (controller.signal.aborted) return;
+
       if (res.data.reply) {
-        setMessages((prev) => [...prev, { prompt: submittedPrompt }, { reply: res.data.reply }]);
+        setMessages((prev) => {
+          const without = prev.filter((m) => !m.pending);
+          return [...without, { reply: res.data.reply }];
+        });
+
+        if (!token) {
+          const finalMessages = messages.concat({ prompt: submittedPrompt }, { reply: res.data.reply });
+          const saved = saveGuestChat(activeChatId, finalMessages);
+          onGuestHistoryUpdate(saved);
+          return;
+        }
+
         if (res.data.chatId) {
-          const newChatId = res.data.chatId;
-          setChatId(newChatId);
-          if (!id || id !== newChatId) navigate(`/chat/${newChatId}`, { replace: !!id });
+          const serverChatId = res.data.chatId;
+          setChatId(serverChatId);
+          if (activeChatId !== serverChatId) navigate(`/chat/${serverChatId}`, { replace: true });
           axios.get(`${API_URL}/api/history`, { headers: authHeaders })
             .then((histRes) => onHistoryUpdate(histRes.data.data || []))
             .catch(() => {});
@@ -266,23 +410,42 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
         return;
       }
 
-      const newMessage = { prompt: submittedPrompt, results: res.data.data, url: res.data.resolvedUrl };
-      setMessages((prev) => [...prev, newMessage]);
+      setMessages((prev) => {
+        const without = prev.filter((m) => !m.pending);
+        return [...without, { prompt: submittedPrompt, results: res.data.data, url: res.data.resolvedUrl }];
+      });
+
+      if (!token) {
+        const finalMessages = messages.concat({ prompt: submittedPrompt, results: res.data.data, url: res.data.resolvedUrl });
+        const saved = saveGuestChat(activeChatId, finalMessages);
+        onGuestHistoryUpdate(saved);
+        return;
+      }
 
       if (res.data.chatId) {
-        const newChatId = res.data.chatId;
-        setChatId(newChatId);
-        if (!id || id !== newChatId) {
-          navigate(`/chat/${newChatId}`, { replace: !!id });
-        }
+        const serverChatId = res.data.chatId;
+        setChatId(serverChatId);
+        if (activeChatId !== serverChatId) navigate(`/chat/${serverChatId}`, { replace: true });
         axios.get(`${API_URL}/api/history`, { headers: authHeaders })
           .then((histRes) => onHistoryUpdate(histRes.data.data || []))
           .catch(() => {});
       }
     } catch (err) {
+      // Remove pending bubble — prompt bubble stays (already in history)
+      setMessages((prev) => prev.filter((m) => !m.pending));
+      if (axios.isCancel(err) || err.name === 'CanceledError') {
+        // Keep guest history updated with just the prompt (no results)
+        if (!token) {
+          const kept = messages.concat({ prompt: submittedPrompt });
+          const saved = saveGuestChat(activeChatId, kept);
+          onGuestHistoryUpdate(saved);
+        }
+        setLoading(false);
+        return;
+      }
       setError(err.response?.data?.error || 'Something went wrong. Please try again.');
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   };
 
@@ -290,8 +453,33 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
     e.preventDefault();
     if (!prompt.trim()) { setError('Please enter a prompt'); return; }
     const submittedPrompt = prompt;
+    const pendingChatId = chatId || crypto.randomUUID();
     setPrompt('');
-    await doScrape(submittedPrompt);
+    if (textareaRef.current) { textareaRef.current.style.height = 'auto'; }
+    if (!chatId) {
+      setChatId(pendingChatId);
+      navigate(`/chat/${pendingChatId}`, { replace: false });
+    }
+
+    // Push to history immediately with just the prompt so the chat appears
+    // even if scraping is cancelled before completion
+    const initialMessages = [...messages, { prompt: submittedPrompt }];
+    if (!token) {
+      const saved = saveGuestChat(pendingChatId, initialMessages);
+      onGuestHistoryUpdate(saved);
+    } else {
+      // For logged-in users, refresh history after server saves it (handled in doScrape)
+      // but optimistically add to sidebar immediately too
+      onHistoryUpdate((prev) => {
+        if (!prev) return prev;
+        const exists = prev.find((h) => h.id === pendingChatId);
+        if (exists) return prev;
+        const now = new Date().toISOString();
+        return [{ id: pendingChatId, messages: [{ prompt: submittedPrompt }], created_at: now, updated_at: now }, ...prev];
+      });
+    }
+
+    await doScrape(submittedPrompt, pendingChatId);
   };
 
 
@@ -303,16 +491,7 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
         <div className="app-main-content">
           <div className="conversation">
             {messages.map((msg, i) => (
-              <div key={i} className="conversation-message">
-                {msg.reply ? (
-                  <div className="assistant-reply">{msg.reply}</div>
-                ) : (
-                  <>
-                    <p className="conversation-message-prompt">{msg.prompt}</p>
-                    {msg.results && <ResultsTable data={msg.results} />}
-                  </>
-                )}
-              </div>
+              <ConversationMessage key={i} msg={msg} />
             ))}
             <div ref={conversationEndRef} />
           </div>
@@ -339,17 +518,26 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
               </div>
               <div className="templates">
                 <p className="templates-label">Try an example</p>
-                <div className="templates-grid">
-                  {TEMPLATES.map((t) => (
-                    <button
-                      key={t.label}
-                      className="template-card"
-                      onClick={() => { setPrompt(t.prompt); setError(null); }}
-                    >
-                      <span className="template-card-label">{t.label}</span>
-                      <span className="template-card-desc">{t.description}</span>
-                    </button>
-                  ))}
+                <div className="templates-carousel-mask">
+                  <div className="templates-carousel-track">
+                    {[...TEMPLATES, ...TEMPLATES].map((t, i) => (
+                      <button
+                        key={i}
+                        className="template-card"
+                        onClick={() => {
+                          setError(null);
+                          setPrompt('');
+                          const newId = crypto.randomUUID();
+                          setChatId(newId);
+                          navigate(`/chat/${newId}`, { replace: false });
+                          doScrape(t.prompt, newId);
+                        }}
+                      >
+                        <span className="template-card-label">{t.label}</span>
+                        <span className="template-card-desc">{t.description}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </>
@@ -362,59 +550,39 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
         <div className={`input-card${loading ? ' input-card--loading' : ''}`}>
           <form onSubmit={handleSubmit}>
             <div className={`input-card-body${hasMessages ? ' input-card-body--collapsed' : ''}`}>
-              {loading && (
-                <div className="scraping-overlay">
-                  <span className="scraping-spinner" />
-                  <span className="scraping-text">Scraping the web...</span>
-                </div>
-              )}
               <textarea
+                ref={textareaRef}
                 value={prompt}
-                onChange={(e) => { setPrompt(e.target.value); setError(null); }}
+                onChange={(e) => { setPrompt(e.target.value); setError(null); autoResize(); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!loading && prompt.trim()) handleSubmit(e);
+                  }
+                }}
                 placeholder={animatedPlaceholder}
                 className={`scraper-textarea${hasMessages ? ' scraper-textarea--collapsed' : ''}`}
-                rows={hasMessages ? 1 : 5}
+                rows={1}
                 disabled={loading}
               />
-              {!hasMessages && (
-                <div className="api-status-bar">
-                  <span className="api-status-item">
-                    <StatusDot status={apiStatus?.claude} />
-                    Claude
-                  </span>
-                  <span className="api-status-item">
-                    <StatusDot status={apiStatus?.brightdata} />
-                    BrightData
-                  </span>
-                </div>
-              )}
               {error && <p className="input-error">{error}</p>}
             </div>
-            {!hasMessages && (
-              <div className="input-card-footer">
-                <div className="footer-actions">
-                  <button type="button" className="footer-action-btn">
-                    <SparklesIcon />
-                    Add AI features
-                  </button>
-                  <button type="button" className="footer-action-btn">
-                    <PlusIcon />
-                    Connect your data
-                  </button>
-                </div>
-                <button type="submit" className="btn-build" disabled={loading || !prompt.trim()}>
-                  {loading ? <><span className="spinner" /> Scraping...</> : 'Build it'}
-                </button>
+            <div className="input-card-footer">
+              <div className="api-status-bar">
+                <span className="api-status-item">
+                  <StatusDot status={apiStatus?.claude} />
+                  Claude
+                </span>
+                <span className="api-status-item">
+                  <StatusDot status={apiStatus?.brightdata} />
+                  BrightData
+                </span>
               </div>
-            )}
-            {hasMessages && (
-              <div className="input-card-footer">
-                <div className="footer-actions" />
-                <button type="submit" className="btn-build" disabled={loading || !prompt.trim()}>
-                  {loading ? <><span className="spinner" /> Scraping...</> : 'Build it'}
-                </button>
-              </div>
-            )}
+              {loading
+                ? <button type="button" className="btn-icon btn-icon--stop" onClick={handleStop}><StopIcon /></button>
+                : <button type="submit" className="btn-icon" disabled={!prompt.trim()}><ArrowUpIcon /></button>
+              }
+            </div>
           </form>
         </div>
       </div>
@@ -424,6 +592,7 @@ function ChatPage({ onHistoryUpdate, token, apiStatus }) {
 
 export default function App() {
   const [historyItems, setHistoryItems] = useState(null);
+  const [guestHistoryItems, setGuestHistoryItems] = useState(() => loadGuestHistory());
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
   const [loginMode, setLoginMode] = useState(null);
@@ -445,6 +614,18 @@ export default function App() {
         localStorage.removeItem('scraperUser');
       }
     }
+  }, []);
+
+  const handleGuestHistoryUpdate = useCallback((savedChat) => {
+    setGuestHistoryItems((prev) => {
+      const without = prev.filter((c) => c.id !== savedChat.id);
+      return [savedChat, ...without];
+    });
+  }, []);
+
+  const handleDeleteGuest = useCallback((id) => {
+    deleteGuestChat(id);
+    setGuestHistoryItems(loadGuestHistory());
   }, []);
 
   useEffect(() => {
@@ -484,14 +665,15 @@ export default function App() {
       <Header user={user} onLoginClick={() => setLoginMode('login')} onRegisterClick={() => setLoginMode('register')} onLogout={handleLogout} isAdmin={isAdmin} />
       <div className="app-body">
         <History
-          historyItems={historyItems}
-          setHistoryItems={setHistoryItems}
+          historyItems={token ? historyItems : guestHistoryItems}
+          setHistoryItems={token ? setHistoryItems : setGuestHistoryItems}
           token={token}
           onLoginClick={() => setLoginMode('login')}
+          onDeleteGuest={handleDeleteGuest}
         />
         <Routes>
-          <Route path="/" element={<ChatPage onHistoryUpdate={setHistoryItems} token={token} apiStatus={apiStatus} />} />
-          <Route path="/chat/:id" element={<ChatPage onHistoryUpdate={setHistoryItems} token={token} apiStatus={apiStatus} />} />
+          <Route path="/" element={<ChatPage onHistoryUpdate={setHistoryItems} onGuestHistoryUpdate={handleGuestHistoryUpdate} token={token} apiStatus={apiStatus} />} />
+          <Route path="/chat/:id" element={<ChatPage onHistoryUpdate={setHistoryItems} onGuestHistoryUpdate={handleGuestHistoryUpdate} token={token} apiStatus={apiStatus} />} />
           <Route path="/about" element={<div className="app-main"><OverviewPage /></div>} />
           <Route path="/terms" element={<div className="app-main"><TermsPage /></div>} />
           {isAdmin && <Route path="/admin" element={<AdminDashboard token={token} />} />}

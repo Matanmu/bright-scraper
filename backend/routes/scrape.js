@@ -10,6 +10,24 @@ const { createChat, appendMessage, getHistory, deleteChat } = require('../servic
 
 const router = express.Router();
 
+// Save a message to an existing chat or create a new one with the given ID.
+// If chatId exists in DB → append. If not → create with that ID.
+async function saveMessage(chatId, message, userId, guestId) {
+  if (!userId && !guestId) return null;
+  if (chatId) {
+    const { data: updated, error: appendError } = await appendMessage(chatId, message, userId, guestId);
+    if (!appendError && updated) return updated.id;
+    // Chat doesn't exist yet (first message with client-generated ID) → create it
+    logger.info(`[scrape] chat ${chatId} not found, creating new`);
+    const { data: created, error: createError } = await createChat(message, userId, chatId, guestId);
+    if (createError) logger.error(`[scrape] db create error: ${createError}`);
+    return created?.id || null;
+  }
+  const { data: created, error: createError } = await createChat(message, userId, null, guestId);
+  if (createError) logger.error(`[scrape] db create error: ${createError}`);
+  return created?.id || null;
+}
+
 const scrapeLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 20,
@@ -67,8 +85,11 @@ router.get('/status', async (req, res) => {
 });
 
 router.post('/scrape', scrapeLimiter, async (req, res) => {
-  const { prompt, chatId, conversationHistory } = req.body;
-  logger.info(`[scrape] received prompt (length: ${prompt?.length}), chatId: ${chatId || 'none'}`);
+  let clientAborted = false;
+  req.on('close', () => { clientAborted = true; });
+
+  const { prompt, chatId, conversationHistory, guestId } = req.body;
+  logger.info(`[scrape] received prompt (length: ${prompt?.length}), chatId: ${chatId || 'none'} | prompt: ${prompt}`);
 
   if (!prompt || !prompt.trim()) {
     logger.warn('[scrape] empty prompt');
@@ -76,7 +97,7 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
   }
 
   const url = extractURL(prompt);
-  const history = Array.isArray(conversationHistory) ? conversationHistory.slice(-5) : [];
+  const history = Array.isArray(conversationHistory) ? conversationHistory.slice(-10) : [];
   logger.info(`[scrape] url in prompt: ${url || 'none'}, history entries: ${history.length}`);
 
   if (chatId && !/^[0-9a-f-]{36}$/i.test(chatId)) {
@@ -90,16 +111,11 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
     if (reply) {
       logger.info(`[scrape] conversational reply`);
       const userId = req.user?.userId;
+      const effectiveGuestId = userId ? null : (guestId || null);
       let savedChatId = chatId || null;
-      if (userId) {
+      if (userId || effectiveGuestId) {
         const message = { prompt, reply };
-        if (chatId) {
-          const { data: updated } = await appendMessage(chatId, message, userId);
-          if (updated) savedChatId = updated.id;
-        } else {
-          const { data: created } = await createChat(message, userId);
-          if (created) savedChatId = created.id;
-        }
+        savedChatId = await saveMessage(chatId, message, userId, effectiveGuestId);
       }
       return res.json({ reply, chatId: savedChatId });
     }
@@ -124,6 +140,19 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
   }
   logger.info(`[scrape] got HTML, length: ${html.length}`);
 
+  // Detect soft 404 / bot-block pages before sending to Claude
+  const htmlLower = html.slice(0, 5000).toLowerCase();
+  const isErrorPage = (
+    html.length < 150_000 &&
+    (htmlLower.includes('404') || htmlLower.includes('not found') || htmlLower.includes('page not found') ||
+     htmlLower.includes('access denied') || htmlLower.includes('403 forbidden') ||
+     htmlLower.includes('captcha') || htmlLower.includes('robot') || htmlLower.includes('are you human'))
+  );
+  if (isErrorPage) {
+    logger.warn(`[scrape] error/blocked page detected (length: ${html.length}), aborting`);
+    return res.status(502).json({ error: 'The page returned an error or blocked the request. Please try a different URL or try again later.' });
+  }
+
   logger.info('[scrape] sending to Claude...');
   const { data, error: extractError, raw } = await extractData(html, prompt);
   if (extractError) {
@@ -132,32 +161,22 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
   }
   logger.info(`[scrape] claude returned: ${JSON.stringify(data).slice(0, 200)}`);
 
+  if (clientAborted) {
+    logger.info('[scrape] client disconnected before DB write — skipping');
+    return;
+  }
+
   const userId = req.user?.userId;
+  const effectiveGuestId = userId ? null : (guestId || null);
   let savedChatId = null;
 
-  if (userId) {
+  if (userId || effectiveGuestId) {
     const message = { prompt, results: data };
-    logger.info('[scrape] saving to database...');
-
-    if (chatId) {
-      const { data: updated, error: appendError } = await appendMessage(chatId, message, userId);
-      if (appendError) {
-        logger.error(`[scrape] db append error: ${appendError}`);
-      } else {
-        savedChatId = updated.id;
-        logger.info(`[scrape] appended message to chat ${savedChatId}`);
-      }
-    } else {
-      const { data: created, error: createError } = await createChat(message, userId);
-      if (createError) {
-        logger.error(`[scrape] db create error: ${createError}`);
-      } else {
-        savedChatId = created.id;
-        logger.info(`[scrape] created new chat ${savedChatId}`);
-      }
-    }
+    logger.info(`[scrape] saving to database (${userId ? 'user' : 'guest'})...`);
+    savedChatId = await saveMessage(chatId, message, userId, effectiveGuestId);
+    if (savedChatId) logger.info(`[scrape] saved to chat ${savedChatId}`);
   } else {
-    logger.info('[scrape] guest user — skipping history save');
+    logger.info('[scrape] anonymous — skipping history save');
   }
 
   return res.json({ data, chatId: savedChatId, saved: !!savedChatId, resolvedUrl: searchURL });

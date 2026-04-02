@@ -35,10 +35,11 @@ function extractDomain(prompt) {
   return match ? match[1] : null;
 }
 
-export default function History({ historyItems, setHistoryItems, token, onLoginClick }) {
+export default function History({ historyItems, setHistoryItems, token, onLoginClick, onDeleteGuest }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const activeId = location.pathname.startsWith('/chat/') ? location.pathname.split('/chat/')[1] : null;
 
   const authHeaders = token
@@ -46,7 +47,7 @@ export default function History({ historyItems, setHistoryItems, token, onLoginC
     : {};
 
   useEffect(() => {
-    if (!token) { setHistoryItems([]); return; }
+    if (!token) return; // guest history is managed by App via localStorage
     axios.get(`${API_URL}/api/history`, { headers: authHeaders })
       .then((res) => setHistoryItems(res.data.data || []))
       .catch(() => setHistoryItems([]));
@@ -54,6 +55,12 @@ export default function History({ historyItems, setHistoryItems, token, onLoginC
 
   const handleDelete = async (e, itemId) => {
     e.stopPropagation();
+    if (!token) {
+      // Guest delete
+      onDeleteGuest?.(itemId);
+      if (activeId === itemId) navigate('/');
+      return;
+    }
     await axios.delete(`${API_URL}/api/history/${itemId}`, { headers: authHeaders }).catch(() => {});
     setHistoryItems((prev) => (prev || []).filter((item) => item.id !== itemId));
     if (activeId === itemId) navigate('/');
@@ -62,50 +69,60 @@ export default function History({ historyItems, setHistoryItems, token, onLoginC
   const items = historyItems || [];
 
   return (
-    <aside className={`history${collapsed ? ' history--collapsed' : ''}`}>
-      <div className="history-header">
-        {!collapsed && <h2 className="history-title">History</h2>}
-        <button className="history-toggle" onClick={() => setCollapsed((v) => !v)} title={collapsed ? 'Expand' : 'Collapse'}>
-          {collapsed ? <ToggleOffIcon /> : <ToggleOnIcon />}
-        </button>
-      </div>
-
-      {!collapsed && !token ? (
-        <div className="history-auth-prompt">
-          <p>Sign in to save and view your scraping history.</p>
-          <button className="history-login-btn" onClick={onLoginClick}>Log in</button>
+    <>
+      {mobileOpen && <div className="mobile-overlay" onClick={() => { setMobileOpen(false); setCollapsed(true); }} />}
+      <button className="history-toggle history-toggle--mobile" style={{ left: mobileOpen ? 260 : 0 }} onClick={() => setMobileOpen((v) => !v)} title={mobileOpen ? 'Close' : 'Open'}>
+        {mobileOpen ? <ToggleOnIcon /> : <ToggleOffIcon />}
+      </button>
+      <aside className={`history${collapsed ? ' history--collapsed' : ''}${mobileOpen ? ' history--mobile-open' : ''}`}>
+        <div className="history-header">
+          {!collapsed && <h2 className="history-title">History</h2>}
+          <button className="history-toggle history-toggle--desktop" onClick={() => setCollapsed((v) => !v)} title={collapsed ? 'Expand' : 'Collapse'}>
+            {collapsed ? <ToggleOffIcon /> : <ToggleOnIcon />}
+          </button>
         </div>
-      ) : !collapsed && (
-        <ul className="history-list">
-          {items.length === 0 && (
-            <p className="history-empty">No history yet</p>
-          )}
-          {items.map((item) => {
-            const firstMessage = Array.isArray(item.messages) && item.messages.length > 0
-              ? item.messages[0]
-              : null;
-            const title = firstMessage?.prompt || '';
-            const domain = title ? extractDomain(title) : null;
-            const isActive = item.id === activeId;
-            return (
-              <li
-                key={item.id}
-                className={`history-item${isActive ? ' history-item--active' : ''}`}
-                onClick={() => navigate(`/chat/${item.id}`)}
-              >
-                <div className="history-item-header">
-                  {domain && <span className="history-domain">{domain}</span>}
-                  <button className="history-delete" type="button" onClick={(e) => handleDelete(e, item.id)} title="Delete">
-                    ✕
-                  </button>
-                </div>
-                <p className="history-prompt">{title}</p>
-                <span className="history-time">{timeAgo(item.updated_at || item.created_at)}</span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </aside>
+
+        {(!collapsed || mobileOpen) && (
+          <>
+            <ul className="history-list">
+              {items.length === 0 && (
+                <p className="history-empty">No history yet</p>
+              )}
+              {items.map((item) => {
+                const firstMessage = Array.isArray(item.messages) && item.messages.length > 0
+                  ? item.messages[0]
+                  : null;
+                const title = firstMessage?.prompt || '';
+                const domain = title ? extractDomain(title) : null;
+                const isActive = item.id === activeId;
+                return (
+                  <li
+                    key={item.id}
+                    className={`history-item${isActive ? ' history-item--active' : ''}`}
+                    onClick={() => { navigate(`/chat/${item.id}`); setMobileOpen(false); }}
+                  >
+                    <div className="history-item-header">
+                      {domain && <span className="history-domain">{domain}</span>}
+                      <button className="history-delete" type="button" onClick={(e) => handleDelete(e, item.id)} title="Delete">
+                        ✕
+                      </button>
+                    </div>
+                    <p className="history-prompt">{title}</p>
+                    <span className="history-time">{timeAgo(item.updated_at || item.created_at)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+
+            {!token && (
+              <div className="history-sync-nudge">
+                <p>Sign in to sync history across devices</p>
+                <button className="history-login-btn" onClick={onLoginClick}>Sign in</button>
+              </div>
+            )}
+          </>
+        )}
+      </aside>
+    </>
   );
 }

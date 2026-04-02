@@ -84,7 +84,11 @@ async function interpretPrompt(prompt, conversationHistory = []) {
   if (!process.env.ANTHROPIC_API_KEY) return { url: null, reply: null };
 
   const historyContext = conversationHistory.length > 0
-    ? `\nConversation history:\n${conversationHistory.map((h, i) => `${i + 1}. Prompt: "${h.prompt}" → URL: ${h.url}`).join('\n')}\n`
+    ? `\nConversation history:\n${conversationHistory.map((h, i) => {
+        if (h.reply) return `${i + 1}. User: "${h.prompt}" → Assistant asked: "${h.reply}"`;
+        if (h.url) return `${i + 1}. User: "${h.prompt}" → Scraped URL: ${h.url}`;
+        return `${i + 1}. User: "${h.prompt}"`;
+      }).join('\n')}\n`
     : '';
 
   try {
@@ -107,15 +111,17 @@ Construct the best search/listing URL from the user's intent:
 - "get me 5 Rolex watches on ebay uk" → https://www.ebay.co.uk/sch/i.html?_nkw=Rolex+watches
 - "airbnb listings in Tokyo" → https://www.airbnb.com/s/Tokyo/homes
 - "frontend developer jobs on linkedin in Israel" → https://www.linkedin.com/jobs/search/?keywords=frontend+developer&location=Israel
-- "top movies on imdb" → https://www.imdb.com/chart/top/
+- "top movies on imdb" → https://www.imdb.com/chart/top/ (NOT /chart/top250/ or /chart/top250movies/ — those return 404)
 ${historyContext}
 Current message: ${prompt}
 
 Rules:
 1. If the message is a scraping request and you can resolve a URL → respond with JSON: {"url": "https://..."}
-2. If the message is a scraping request but you need clarification → respond with JSON: {"url": null, "reply": "your short friendly question"}
-3. If the message is NOT a scraping request (greeting, general question, off-topic) → respond with JSON: {"url": null, "reply": "your helpful conversational answer, ending with a nudge to try a scraping request"}
-4. NEVER return anything other than valid JSON with "url" and "reply" keys.`,
+2. If the request mentions multiple sites or regions (e.g. "Spain VS USA", "amazon.com and amazon.es") → pick the FIRST one and resolve its URL. The user will ask for the second one after. Never reply with links — always return a URL to scrape.
+3. ONLY ask a clarifying question if the request is completely ambiguous (no product, no site, no region at all). If you can make a reasonable guess, just go with it.
+4. NEVER tell the user to open links or browse themselves. This is a scraping tool — always return a URL in JSON for the system to scrape.
+5. If the message is NOT a scraping request (greeting, general question, off-topic) → respond with JSON: {"url": null, "reply": "your helpful conversational answer, ending with a nudge to try a scraping request"}
+6. NEVER return anything other than valid JSON with "url" and "reply" keys.`,
         },
       ],
     }));
@@ -143,7 +149,11 @@ async function resolveSearchURL(baseURL, prompt, conversationHistory = []) {
   if (!process.env.ANTHROPIC_API_KEY) return baseURL;
 
   const historyContext = conversationHistory.length > 0
-    ? `\nConversation history (previous prompts and URLs used):\n${conversationHistory.map((h, i) => `${i + 1}. Prompt: "${h.prompt}" → URL: ${h.url}`).join('\n')}\n`
+    ? `\nConversation history:\n${conversationHistory.map((h, i) => {
+        if (h.reply) return `${i + 1}. User: "${h.prompt}" → Assistant asked: "${h.reply}"`;
+        if (h.url) return `${i + 1}. User: "${h.prompt}" → Scraped URL: ${h.url}`;
+        return `${i + 1}. User: "${h.prompt}"`;
+      }).join('\n')}\n`
     : '';
 
   try {
@@ -159,7 +169,7 @@ Base URL: ${baseURL || 'none — this is a follow-up, infer from history'}
 Current prompt: ${prompt}
 
 Examples:
-- "go to https://imdb.com and get top 5 movies" → https://www.imdb.com/chart/top/
+- "go to https://imdb.com and get top 5 movies" → https://www.imdb.com/chart/top/ (use ONLY this URL, NOT /chart/top250/ or /chart/top250movies/)
 - "go to https://amazon.com and get 5 Logitech keyboards" → https://www.amazon.com/s?k=Logitech+keyboards
 - "go to https://airbnb.com and get 5 listings in Paris" → https://www.airbnb.com/s/Paris/homes
 - "go to https://ebay.com and get 5 Rolex watches" → https://www.ebay.com/sch/i.html?_nkw=Rolex+watches

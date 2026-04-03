@@ -956,6 +956,40 @@ body {
   white-space: pre-wrap;
 }
 
+// ── Error Bubble ─────────────────────────────────────────────────────────────
+
+.error-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: rgba(225, 29, 72, 0.06);
+  border: 1px solid rgba(225, 29, 72, 0.2);
+  border-radius: 12px;
+  max-width: 560px;
+  flex-wrap: wrap;
+}
+
+.error-bubble-text {
+  font-size: 13.5px;
+  color: #e11d48;
+  line-height: 1.5;
+}
+
+.error-retry-btn {
+  flex-shrink: 0;
+  background: #e11d48;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  &:hover { background: #be123c; }
+}
+
 // ── Empty State ───────────────────────────────────────────────────────────────
 
 .empty-state {

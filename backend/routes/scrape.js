@@ -136,7 +136,13 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
   }
   if (fetchError) {
     logger.error(`[scrape] brightdata error: ${fetchError}`);
-    return res.status(500).json({ error: 'Failed to fetch the page. Please try again.' });
+    const isBlocked = fetchError.includes('403') || fetchError.includes('401') || fetchError.includes('blocked');
+    return res.status(isBlocked ? 403 : 500).json({
+      error: isBlocked
+        ? 'This site is blocking access right now. You can try again — a different IP may get through.'
+        : 'Failed to fetch the page. Please try again.',
+      retryable: true,
+    });
   }
   logger.info(`[scrape] got HTML, length: ${html.length}`);
 
@@ -150,7 +156,10 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
   );
   if (isErrorPage) {
     logger.warn(`[scrape] error/blocked page detected (length: ${html.length}), aborting`);
-    return res.status(502).json({ error: 'The page returned an error or blocked the request. Please try a different URL or try again later.' });
+    return res.status(403).json({
+      error: 'This site is blocking access right now. You can try again — a different IP may get through.',
+      retryable: true,
+    });
   }
 
   logger.info('[scrape] sending to Claude...');

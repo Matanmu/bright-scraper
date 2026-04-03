@@ -242,15 +242,38 @@ function PendingMessage() {
   );
 }
 
-function ConversationMessage({ msg }) {
+function ConversationMessage({ msg, onRetry }) {
   const { copied: copiedPrompt, copy: copyPrompt } = useCopy();
   const { copied: copiedReply, copy: copyReply } = useCopy();
 
   if (msg.pending) return <PendingMessage />;
 
+  if (msg.error) {
+    return (
+      <div className="conversation-message">
+        <div className="error-bubble">
+          <span className="error-bubble-text">{msg.error}</span>
+          {msg.retryable && (
+            <button className="error-retry-btn" onClick={() => onRetry(msg.prompt)}>
+              Try Again
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (msg.reply) {
     return (
       <div className="conversation-message">
+        {msg.prompt && (
+          <div className="conversation-message-prompt-wrapper">
+            <p className="conversation-message-prompt">{msg.prompt}</p>
+            <button className="copy-btn copy-btn--hover" onClick={() => copyPrompt(msg.prompt)} title="Copy">
+              <CopyIcon copied={copiedPrompt} />
+            </button>
+          </div>
+        )}
         <div className="assistant-reply-wrapper">
           <div className="assistant-reply">{msg.reply}</div>
           <button className="copy-btn copy-btn--always" onClick={() => copyReply(msg.reply)} title="Copy">
@@ -344,12 +367,14 @@ function ChatPage({ onHistoryUpdate, onGuestHistoryUpdate, token, apiStatus }) {
       .then((res) => {
         const item = (res.data.data || []).find((h) => h.id === id);
         if (item && Array.isArray(item.messages)) {
-          const mapped = [];
-          item.messages.forEach((m) => {
-            mapped.push({ prompt: m.prompt });
-            if (m.reply) mapped.push({ reply: m.reply });
-            else if (m.results) mapped[mapped.length - 1].results = m.results;
-          });
+          const mapped = item.messages
+            .filter((m) => m.prompt || m.reply)
+            .map((m) => ({
+              prompt: m.prompt || null,
+              reply: m.reply || null,
+              results: m.results || null,
+              url: m.url || null,
+            }));
           setMessages(mapped);
         }
       })
@@ -389,6 +414,13 @@ function ChatPage({ onHistoryUpdate, onGuestHistoryUpdate, token, apiStatus }) {
       if (res.data.reply) {
         setMessages((prev) => {
           const without = prev.filter((m) => !m.pending);
+          // Replace the optimistic prompt bubble with prompt+reply
+          const idx = without.findLastIndex((m) => m.prompt === submittedPrompt && !m.results);
+          if (idx !== -1) {
+            const updated = [...without];
+            updated[idx] = { prompt: submittedPrompt, reply: res.data.reply };
+            return updated;
+          }
           return [...without, { reply: res.data.reply }];
         });
 
@@ -411,7 +443,14 @@ function ChatPage({ onHistoryUpdate, onGuestHistoryUpdate, token, apiStatus }) {
       }
 
       setMessages((prev) => {
+        // Replace the optimistic prompt bubble with the results-enriched version
         const without = prev.filter((m) => !m.pending);
+        const idx = without.findLastIndex((m) => m.prompt === submittedPrompt && !m.results);
+        if (idx !== -1) {
+          const updated = [...without];
+          updated[idx] = { prompt: submittedPrompt, results: res.data.data, url: res.data.resolvedUrl };
+          return updated;
+        }
         return [...without, { prompt: submittedPrompt, results: res.data.data, url: res.data.resolvedUrl }];
       });
 
@@ -443,7 +482,12 @@ function ChatPage({ onHistoryUpdate, onGuestHistoryUpdate, token, apiStatus }) {
         setLoading(false);
         return;
       }
-      setError(err.response?.data?.error || 'Something went wrong. Please try again.');
+      const errData = err.response?.data;
+      setMessages((prev) => [...prev, {
+        error: errData?.error || 'Something went wrong. Please try again.',
+        retryable: errData?.retryable || false,
+        prompt: submittedPrompt,
+      }]);
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
@@ -482,6 +526,13 @@ function ChatPage({ onHistoryUpdate, onGuestHistoryUpdate, token, apiStatus }) {
     await doScrape(submittedPrompt, pendingChatId);
   };
 
+  const handleRetry = useCallback((retryPrompt) => {
+    // Remove the error message, then re-scrape with the same prompt
+    setMessages((prev) => prev.filter((m) => !m.error));
+    const retryChatId = chatId || crypto.randomUUID();
+    if (!chatId) { setChatId(retryChatId); navigate(`/chat/${retryChatId}`, { replace: false }); }
+    doScrape(retryPrompt, retryChatId);
+  }, [chatId]); // eslint-disable-line
 
   const hasMessages = messages.length > 0;
 
@@ -491,7 +542,7 @@ function ChatPage({ onHistoryUpdate, onGuestHistoryUpdate, token, apiStatus }) {
         <div className="app-main-content">
           <div className="conversation">
             {messages.map((msg, i) => (
-              <ConversationMessage key={i} msg={msg} />
+              <ConversationMessage key={i} msg={msg} onRetry={handleRetry} />
             ))}
             <div ref={conversationEndRef} />
           </div>
